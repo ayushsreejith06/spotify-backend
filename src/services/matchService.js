@@ -54,17 +54,10 @@ function findBestTrackMatch(requestedSongName, requestedArtistName, spotifySearc
     isConfidentTrackMatch(requestedSongName, requestedArtistName, track)
   ));
 
-  if (confidentMatches.length === 1) {
+  if (confidentMatches.length >= 1) {
     return {
       status: MATCH_STATUS.CONFIDENT,
       track: confidentMatches[0],
-    };
-  }
-
-  if (confidentMatches.length > 1) {
-    return {
-      status: MATCH_STATUS.AMBIGUOUS,
-      candidates: confidentMatches.map(toCandidate),
     };
   }
 
