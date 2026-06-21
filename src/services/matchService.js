@@ -3,7 +3,6 @@ const { normalizeText } = require("../utils/normalize");
 const MATCH_STATUS = {
   CONFIDENT: "confident_match",
   NO_MATCH: "no_match",
-  AMBIGUOUS: "ambiguous_match",
 };
 
 function getTrackArtists(track) {
@@ -14,19 +13,6 @@ function getTrackArtists(track) {
   return track.artists
     .map((artist) => artist?.name)
     .filter((name) => typeof name === "string" && name.trim().length > 0);
-}
-
-function getSpotifyUrl(track) {
-  return track?.external_urls?.spotify || null;
-}
-
-function toCandidate(track) {
-  return {
-    trackName: track?.name || "",
-    artists: getTrackArtists(track),
-    album: track?.album?.name || "",
-    spotifyUrl: getSpotifyUrl(track),
-  };
 }
 
 function isExactSongMatch(requestedSongName, track) {
@@ -69,5 +55,4 @@ function findBestTrackMatch(requestedSongName, requestedArtistName, spotifySearc
 module.exports = {
   MATCH_STATUS,
   findBestTrackMatch,
-  toCandidate,
 };

@@ -79,6 +79,7 @@ function getSpotifyErrorMessage(body, fallbackMessage) {
 
 function createSpotifyResponseError(response, body) {
   const retryAfter = response.headers.get("retry-after");
+  const spotifyErrorCode = typeof body?.error === "string" ? body.error : undefined;
 
   if (response.status === 429) {
     return new SpotifyClientError("Spotify rate limit exceeded.", {
@@ -89,7 +90,12 @@ function createSpotifyResponseError(response, body) {
     });
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    spotifyErrorCode === "invalid_grant" ||
+    spotifyErrorCode === "invalid_client"
+  ) {
     return new SpotifyClientError(
       getSpotifyErrorMessage(body, "Spotify authorization failed."),
       {

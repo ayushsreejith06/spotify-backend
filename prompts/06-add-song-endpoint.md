@@ -38,28 +38,24 @@ Tasks:
 { "ok": false, "status": "song_not_found" }
 ```
 
-10. If ambiguous, return HTTP `200` with:
-
-```json
-{ "ok": false, "status": "ambiguous_match" }
-```
-
-11. Check `playlist_tracks` for duplicates.
-12. If duplicate, return:
+10. Check `playlist_tracks` for duplicates.
+11. If duplicate, return:
 
 ```json
 { "ok": true, "status": "skipped_duplicate" }
 ```
 
-13. Add track to Spotify playlist.
-14. Insert track into `playlist_tracks`.
-15. Return:
+12. If Supabase has no duplicate row, check Spotify playlist items before adding.
+13. If Spotify already contains the track, backfill `playlist_tracks` and return `skipped_duplicate`.
+14. Add track to Spotify playlist.
+15. Insert track into `playlist_tracks`.
+16. Return:
 
 ```json
 { "ok": true, "status": "added" }
 ```
 
-16. Use the exact response style from the guide.
+17. Use the exact response style from the guide.
 
 Constraints:
 

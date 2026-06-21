@@ -30,13 +30,8 @@ Tasks:
 5. Return one of:
    - confident match
    - no match
-   - ambiguous match
-6. For ambiguous matches, return candidate objects with:
-   - track name
-   - artists
-   - album
-   - Spotify URL
-7. Prefer strictness over false positives.
+6. If multiple exact title and artist matches exist, choose the first Spotify-ranked exact match.
+7. Prefer exact title and artist matches over fuzzy matching.
 
 Constraints:
 

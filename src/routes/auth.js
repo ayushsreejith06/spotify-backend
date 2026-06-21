@@ -8,7 +8,6 @@ const SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_ME_URL = "https://api.spotify.com/v1/me";
 const SPOTIFY_SCOPES = [
-  "playlist-modify-public",
   "playlist-modify-private",
   "playlist-read-private",
   "user-read-private",

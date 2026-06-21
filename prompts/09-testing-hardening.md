@@ -24,7 +24,7 @@ Tasks:
    - existing playlist reuse
    - duplicate song skip
    - unknown song
-   - ambiguous song
+   - multiple exact Spotify matches using the first exact match
    - Spotify auth failure
    - Supabase failure
 2. Add automated tests only if the project already has a test setup or it is simple to add without overbuilding.

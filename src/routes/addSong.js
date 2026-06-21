@@ -1,7 +1,13 @@
 const express = require("express");
 const { getPlaylistByKey, insertPlaylist, getPlaylistTrack, insertPlaylistTrack } = require("../db/playlistStore");
 const { findBestTrackMatch, MATCH_STATUS } = require("../services/matchService");
-const { SpotifyClientError, createPrivatePlaylist, searchTrack, addTrackToPlaylist } = require("../services/spotifyClient");
+const {
+  SpotifyClientError,
+  createPrivatePlaylist,
+  searchTrack,
+  addTrackToPlaylist,
+  getPlaylistItems,
+} = require("../services/spotifyClient");
 
 const router = express.Router();
 const WHITESPACE_REGEX = /\s+/g;
@@ -92,18 +98,6 @@ function sendSongNotFound(res, { playlistName, songName, artistName }) {
   });
 }
 
-function sendAmbiguousMatch(res, { playlistName, songName, artistName }, candidates) {
-  res.status(200).json({
-    ok: false,
-    status: "ambiguous_match",
-    playlistName,
-    songName,
-    artistName,
-    message: "Multiple possible Spotify matches found. Add manually.",
-    candidates,
-  });
-}
-
 function sendDuplicateSkipped(res, playlist, playlistName, track, fallbackArtistName) {
   res.status(200).json({
     ok: true,
@@ -124,6 +118,24 @@ function sendAdded(res, playlist, playlistName, track, fallbackArtistName) {
     ...buildTrackResponseFields(track, fallbackArtistName),
     message: "Song added to playlist.",
   });
+}
+
+function getPlaylistItemTrackUri(item) {
+  if (typeof item?.track?.uri === "string") {
+    return item.track.uri;
+  }
+
+  if (typeof item?.uri === "string") {
+    return item.uri;
+  }
+
+  return "";
+}
+
+async function playlistAlreadyContainsTrack(spotifyPlaylistId, trackUri) {
+  const items = await getPlaylistItems(spotifyPlaylistId);
+
+  return items.some((item) => getPlaylistItemTrackUri(item) === trackUri);
 }
 
 function handleRouteError(error, next) {
@@ -162,15 +174,23 @@ router.post("/", async (req, res, next) => {
       return;
     }
 
-    if (match.status === MATCH_STATUS.AMBIGUOUS) {
-      sendAmbiguousMatch(res, { playlistName, songName, artistName }, match.candidates || []);
-      return;
-    }
-
     const track = match.track;
     const duplicateTrack = await getPlaylistTrack(playlist.spotify_playlist_id, track.uri);
 
     if (duplicateTrack) {
+      sendDuplicateSkipped(res, playlist, playlistName, track, artistName);
+      return;
+    }
+
+    const existingSpotifyTrack = await playlistAlreadyContainsTrack(playlist.spotify_playlist_id, track.uri);
+
+    if (existingSpotifyTrack) {
+      await insertPlaylistTrack({
+        spotifyPlaylistId: playlist.spotify_playlist_id,
+        spotifyTrackUri: track.uri,
+        trackName: track.name,
+        artistName: buildTrackResponseFields(track, artistName).artistName,
+      });
       sendDuplicateSkipped(res, playlist, playlistName, track, artistName);
       return;
     }

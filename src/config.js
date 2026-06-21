@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({ quiet: true });
 
 const config = {
   port: Number(process.env.PORT) || 3000,

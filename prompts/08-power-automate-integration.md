@@ -32,7 +32,6 @@ Tasks:
    - `Artist Name`
    - `Status`
    - `Message`
-   - `Candidate Links`
 6. Explain that `ok: false` should not stop the loop.
 7. Mention that the HTTP connector may require Power Automate Premium.
 

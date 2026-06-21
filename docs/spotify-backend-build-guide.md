@@ -157,28 +157,7 @@ Use HTTP `200` for manageable business failures so Power Automate can continue t
 }
 ```
 
-### 6.7 Failure Response: Ambiguous Match
-
-```json
-{
-  "ok": false,
-  "status": "ambiguous_match",
-  "playlistName": "June Week 3",
-  "songName": "Intro",
-  "artistName": "Artist Name",
-  "message": "Multiple possible Spotify matches found. Add manually.",
-  "candidates": [
-    {
-      "trackName": "Intro",
-      "artists": ["Artist Name"],
-      "album": "Album One",
-      "spotifyUrl": "https://open.spotify.com/track/example"
-    }
-  ]
-}
-```
-
-### 6.8 Failure Response: Invalid Request
+### 6.7 Failure Response: Invalid Request
 
 Use HTTP `400` only when Power Automate sent bad input.
 
@@ -190,7 +169,7 @@ Use HTTP `400` only when Power Automate sent bad input.
 }
 ```
 
-### 6.9 Failure Response: Unauthorized
+### 6.8 Failure Response: Unauthorized
 
 Use HTTP `401` when the `x-api-key` header is missing or wrong.
 
@@ -280,7 +259,7 @@ Use these scopes:
 playlist-modify-private playlist-read-private user-read-private
 ```
 
-Add `playlist-modify-public` only if the backend will ever create or modify public playlists. For the current requirements, private playlists are enough.
+Do not request `playlist-modify-public` unless the backend is changed to create or modify public playlists. For the current requirements, private playlists are enough.
 
 `user-read-private` is included so the backend can call Spotify's current-user profile endpoint during setup and reliably get your Spotify user ID for playlist creation.
 
@@ -387,13 +366,10 @@ Recommended matching rule:
 
 - Search with limit `5`.
 - Normalize track names and artist names.
-- Accept the first result only if:
-  - Track name is an exact normalized match or very close normalized match.
-  - At least one Spotify artist is an exact normalized match or very close normalized match.
+- Accept the first Spotify-ranked result whose track name is an exact normalized match and whose artist list contains an exact normalized artist match.
 - If zero confident matches, return `song_not_found`.
-- If multiple similarly confident matches exist, return `ambiguous_match`.
 
-Keep this strict. It is better to fail cleanly than to add the wrong song to a playlist.
+This trusts Spotify ranking for release/version selection while still rejecting wrong titles and wrong artists.
 
 ### 10.4 Duplicate Check
 
@@ -401,14 +377,13 @@ Algorithm:
 
 1. Query `playlist_tracks` for `spotify_playlist_id` and `spotify_track_uri`.
 2. If found, return `skipped_duplicate`.
-3. If not found, call Spotify Add Items to Playlist.
-4. Insert the track into `playlist_tracks`.
-5. If the insert conflicts because another request inserted it first, return `skipped_duplicate`.
+3. If not found locally, call Spotify Get Playlist Items for that playlist.
+4. If Spotify already contains the track, insert the missing `playlist_tracks` row and return `skipped_duplicate`.
+5. If Spotify does not contain the track, call Spotify Add Items to Playlist.
+6. Insert the track into `playlist_tracks`.
+7. If the insert conflicts because another request inserted it first, return `skipped_duplicate`.
 
-Optional extra safety:
-
-- If the local database is missing old data, call Spotify Get Playlist Items before adding.
-- This is slower, so use it only if you need to sync pre-existing playlist contents.
+The Supabase duplicate check remains the fast path. Spotify playlist item lookup is only a fallback when the local row is missing.
 
 ### 10.5 Error Handling
 
@@ -417,7 +392,6 @@ Use predictable statuses:
 - `added`
 - `skipped_duplicate`
 - `song_not_found`
-- `ambiguous_match`
 - `invalid_request`
 - `unauthorized`
 - `spotify_auth_error`
@@ -433,7 +407,7 @@ Recommended HTTP status behavior:
 - `429`: Spotify rate limited
 - `500`: backend/database/unexpected error
 
-For Power Automate, `song_not_found` and `ambiguous_match` should return HTTP `200` with `ok: false`.
+For Power Automate, `song_not_found` should return HTTP `200` with `ok: false`.
 
 ## 11. Suggested Project Structure
 
@@ -581,14 +555,12 @@ Tasks:
 - Return:
   - one confident match
   - no match
-  - ambiguous match
-- Include candidate data for ambiguous matches.
 
 Acceptance criteria:
 
 - Exact song and artist matches are accepted.
 - Obvious wrong artist matches are rejected.
-- Ambiguous results return a manageable response for Power Automate.
+- Multiple exact release/version matches use the first Spotify-ranked exact match.
 
 ### Phase 6: Main `/api/add-song` Endpoint
 
@@ -717,7 +689,6 @@ Tasks:
 - Test existing playlist reuse.
 - Test duplicate song skip.
 - Test unknown song.
-- Test ambiguous song.
 - Test Render cold start from Power Automate.
 - Check Supabase rows after each test.
 
@@ -813,7 +784,6 @@ Create an Excel table for failures with columns:
 - `Artist Name`
 - `Status`
 - `Message`
-- `Candidate Links`
 
 When backend response has `ok: false`, append a row.
 
@@ -825,7 +795,6 @@ Recommended mapping:
 - `Artist Name`: request artist name
 - `Status`: backend `status`
 - `Message`: backend `message`
-- `Candidate Links`: join candidate Spotify URLs if present
 
 ## 15. Efficiency Notes
 
@@ -962,7 +931,7 @@ The project is complete when:
 - Existing playlists are reused by case-insensitive name key.
 - Matching songs are added.
 - Duplicate songs are skipped.
-- Unmatched or ambiguous songs are returned as manageable failures.
+- Unmatched songs are returned as manageable failures.
 - Failures can be logged to Excel.
 - Secrets are stored only in environment variables.
 - Backend runs on free cloud hosting.
