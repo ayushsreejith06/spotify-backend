@@ -16,6 +16,118 @@ The backend accepts one row per request:
 POST https://YOUR_RENDER_SERVICE_NAME.onrender.com/api/add-song
 ```
 
+## Backend Contract This Flow Depends On
+
+This section matches the current backend implementation in this repo.
+
+Health check:
+
+```http
+GET https://YOUR_RENDER_SERVICE_NAME.onrender.com/health
+```
+
+Expected health response:
+
+```json
+{
+  "ok": true
+}
+```
+
+Song request endpoint:
+
+```http
+POST https://YOUR_RENDER_SERVICE_NAME.onrender.com/api/add-song
+```
+
+Required headers:
+
+```http
+Content-Type: application/json
+x-api-key: YOUR_BACKEND_API_KEY
+```
+
+Required JSON body properties:
+
+```json
+{
+  "playlistName": "Coffee Chat 2026-06-26",
+  "songName": "Blinding Lights",
+  "artistName": "The Weeknd"
+}
+```
+
+The property names are case-sensitive. Do not send `Playlist Name`, `Song Name`, or `Artist Name` as JSON property names. Those are only the Excel table column names.
+
+The backend requires all three values to be non-empty strings. It trims leading/trailing spaces and collapses repeated internal spaces before using them. Playlist lookup is case-insensitive because the backend stores a lowercase playlist key, so `Coffee Chat` and `coffee chat` reuse the same stored playlist.
+
+Successful add response:
+
+```json
+{
+  "ok": true,
+  "status": "added",
+  "playlistName": "Coffee Chat 2026-06-26",
+  "playlistId": "spotify_playlist_id",
+  "trackName": "Blinding Lights",
+  "artistName": "The Weeknd",
+  "trackUri": "spotify:track:example",
+  "message": "Song added to playlist."
+}
+```
+
+Duplicate response:
+
+```json
+{
+  "ok": true,
+  "status": "skipped_duplicate",
+  "playlistName": "Coffee Chat 2026-06-26",
+  "playlistId": "spotify_playlist_id",
+  "trackName": "Blinding Lights",
+  "artistName": "The Weeknd",
+  "trackUri": "spotify:track:example",
+  "message": "Song already exists in playlist."
+}
+```
+
+Manageable song-not-found response:
+
+```json
+{
+  "ok": false,
+  "status": "song_not_found",
+  "playlistName": "Coffee Chat 2026-06-26",
+  "songName": "Definitely Not A Real Song 12345",
+  "artistName": "Unknown Artist",
+  "message": "No confident Spotify match found. Add manually."
+}
+```
+
+Error responses use this shape:
+
+```json
+{
+  "ok": false,
+  "status": "invalid_request",
+  "message": "playlistName, songName, and artistName are required."
+}
+```
+
+The main statuses this flow should account for are:
+
+| HTTP status | `status` | Meaning | Flow behavior |
+| --- | --- | --- | --- |
+| `200` | `added` | Track was added to Spotify and saved in Supabase | No log row needed |
+| `200` | `skipped_duplicate` | Track already exists in the playlist | No log row needed |
+| `200` | `song_not_found` | Spotify search did not find a confident title and artist match | Append to `FailureLog` and continue |
+| `400` | `invalid_request` | Missing or blank `playlistName`, `songName`, or `artistName` | Avoid this by validating rows before HTTP |
+| `401` | `unauthorized` | Wrong or missing `x-api-key` | Fix the flow secret |
+| `400`, `401`, `403`, or `500` | `spotify_auth_error` | Spotify credentials, refresh token, or backend Spotify environment variable problem | Fix backend environment variables or Spotify OAuth |
+| `429` | `spotify_rate_limited` | Spotify rate limit | Retry later or add retry handling |
+| `500` | `database_error` | Supabase request failed | Check backend logs and Supabase configuration |
+| `500` | `spotify_api_error` or `internal_error` | Unexpected backend or Spotify failure | Check backend logs |
+
 ## Flow Summary
 
 Create an automated cloud flow with this structure:
@@ -27,9 +139,11 @@ Create an automated cloud flow with this structure:
 5. Condition: validate at least one table exists.
 6. Compose: pick the first table name.
 7. Excel action: `List rows present in a table`.
-8. `Apply to each`: send each row to the backend.
-9. Parse the JSON response.
-10. If `ok` is `false`, append a failure row to Excel.
+8. `Apply to each`: validate required row fields.
+9. If a row is missing required fields, append a failure row and skip the HTTP request for that row.
+10. If the row is valid, send it to the backend.
+11. Parse the JSON response.
+12. If `ok` is `false`, append a failure row to Excel.
 
 ## Premium Connector Note
 
@@ -76,6 +190,8 @@ Artist Name
 ```
 
 If the Microsoft Forms export has different column names, rename the table headers before upload or adjust the row mappings in the HTTP body.
+
+Avoid blank rows inside the Excel table. This flow includes a row validation condition so blank required cells are logged as `invalid_request` instead of causing the backend HTTP action to fail.
 
 ## Create The Flow
 
@@ -355,9 +471,68 @@ value
 
 Use the `value` from `List request rows`.
 
+## Add Condition: Row Has Required Fields
+
+Inside `For each song request row`, add a `Condition` before the HTTP action.
+
+Rename it:
+
+```text
+Row has required fields
+```
+
+Use this expression on the left side:
+
+```text
+@and(not(empty(trim(string(coalesce(items('For_each_song_request_row')?['Playlist Name'], ''))))), not(empty(trim(string(coalesce(items('For_each_song_request_row')?['Song Name'], ''))))), not(empty(trim(string(coalesce(items('For_each_song_request_row')?['Artist Name'], ''))))))
+```
+
+Set:
+
+| Operator | Right side |
+| --- | --- |
+| `is equal to` | `true` |
+
+If Power Automate gives your loop a different internal name, rebuild the expression with that loop name or use the dynamic content picker for `Playlist Name`, `Song Name`, and `Artist Name`.
+
+In the `False` branch, add an Excel Online (Business) action:
+
+```text
+Add a row into a table
+```
+
+Rename it:
+
+```text
+Append invalid row to log
+```
+
+Fill in:
+
+| Field | Value |
+| --- | --- |
+| `Location` | Select the SharePoint site containing `Failure Log.xlsx` |
+| `Document Library` | Select the document library containing the log workbook |
+| `File` | Select `Failure Log.xlsx` |
+| `Table` | Select `FailureLog` |
+
+Map the table columns:
+
+| FailureLog column | Value |
+| --- | --- |
+| `Timestamp` | Expression: `utcNow()` |
+| `Source File` | Dynamic content `File name with extension` from the SharePoint trigger |
+| `Playlist Name` | Dynamic content `Playlist Name` from `List request rows` |
+| `Song Name` | Dynamic content `Song Name` from `List request rows` |
+| `Artist Name` | Dynamic content `Artist Name` from `List request rows` |
+| `Status` | `invalid_request` |
+| `Message` | `Playlist Name, Song Name, and Artist Name are required before calling the backend.` |
+
+Leave the rest of the `False` branch empty. Put the HTTP request and all backend response handling in the `True` branch.
+
 ## Add HTTP Request
 
-Inside `For each song request row`, select `Add an action`.
+Inside the `True` branch of `Row has required fields`, select `Add an action`.
 
 Search for:
 
@@ -411,9 +586,11 @@ If Power Automate gives your loop a different internal name, use the dynamic con
 
 The body should still be JSON with property names `playlistName`, `songName`, and `artistName`.
 
+The backend will trim and collapse whitespace, so these values do not need extra cleanup in Power Automate as long as they are non-empty.
+
 ## Parse JSON Response
 
-Still inside `For each song request row`, add an action below `Call Spotify backend`.
+Still inside the `True` branch of `Row has required fields`, add an action below `Call Spotify backend`.
 
 Search for:
 
@@ -458,11 +635,11 @@ Schema:
 }
 ```
 
-The backend may return `trackName` for successful matches and `songName` for failures, so keep both in the schema.
+The backend returns `trackName` for successful matches and `songName` for `song_not_found`, so keep both in the schema. None of these response properties are marked as required because different statuses return different fields.
 
 ## Add Condition: Log Backend Failures
 
-Still inside `For each song request row`, add a `Condition` below `Parse backend response`.
+Still inside the `True` branch of `Row has required fields`, add a `Condition` below `Parse backend response`.
 
 Rename it:
 
@@ -529,9 +706,9 @@ The backend intentionally returns HTTP `200` with `ok: false` for manageable son
 
 Treat those as row-level failures only. Log them and let `For each song request row` continue to the next Excel row.
 
-These errors usually should stop or alert the flow because they mean the setup is wrong or the service failed:
+These errors usually should stop or alert the flow because they mean the setup is wrong or the service failed. The row validation condition should prevent normal blank-cell data issues from reaching the backend as HTTP `400`.
 
-- HTTP `400`: bad request body or missing required fields
+- HTTP `400`: bad request body or missing required fields that bypassed row validation
 - HTTP `401`: wrong or missing `x-api-key`
 - HTTP `429`: Spotify rate limit
 - HTTP `500`: backend, database, or unexpected service failure
@@ -544,12 +721,14 @@ Upload a workbook to the watched SharePoint folder with a table like:
 | --- | --- | --- |
 | Coffee Chat 2026-06-26 | Blinding Lights | The Weeknd |
 | Coffee Chat 2026-06-26 | Definitely Not A Real Song 12345 | Unknown Artist |
+| Coffee Chat 2026-06-26 |  | The Weeknd |
 
 Expected results:
 
 - The first row should be added or skipped as a duplicate.
 - The second row should return `ok: false`.
 - The second row should be appended to `FailureLog`.
+- The third row should be appended to `FailureLog` as `invalid_request` without calling the backend.
 - The flow should complete the whole workbook instead of stopping at the failed song.
 
 ## Operational Notes
